@@ -1,0 +1,565 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import json
+from datetime import datetime
+import threading
+import time
+
+class DeadlockDetectorGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Automated Deadlock Detection System")
+        self.root.geometry("1400x900")
+        self.root.configure(bg="#1a1a2e")
+        
+        # Data structures
+        self.processes = [
+            {"name": "P1", "allocated": [1, 0, 0], "max_need": [3, 2, 1]},
+            {"name": "P2", "allocated": [0, 1, 0], "max_need": [2, 3, 2]},
+            {"name": "P3", "allocated": [0, 0, 1], "max_need": [1, 1, 2]}
+        ]
+        self.total_resources = [4, 3, 3]
+        self.available_resources = [2, 2, 2]
+        self.is_running = False
+        self.animation_speed = 1000  # milliseconds
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # Header Frame
+        header_frame = tk.Frame(self.root, bg="#16213e", height=100)
+        header_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        title_label = tk.Label(
+            header_frame, 
+            text="🔒 Automated Deadlock Detection System",
+            font=("Arial", 24, "bold"),
+            bg="#16213e",
+            fg="#00d4ff"
+        )
+        title_label.pack(pady=20)
+        
+        subtitle = tk.Label(
+            header_frame,
+            text="Real-time Process Monitoring & Resource Allocation Analysis",
+            font=("Arial", 12),
+            bg="#16213e",
+            fg="#a0a0a0"
+        )
+        subtitle.pack()
+        
+        # Main container
+        main_container = tk.Frame(self.root, bg="#1a1a2e")
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Left Panel - Resources & Processes
+        left_panel = tk.Frame(main_container, bg="#16213e", width=500)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        
+        # Resources Section
+        resources_frame = tk.LabelFrame(
+            left_panel,
+            text="📊 System Resources",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff",
+            bd=2
+        )
+        resources_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.resource_entries = []
+        for i, (total, available) in enumerate(zip(self.total_resources, self.available_resources)):
+            frame = tk.Frame(resources_frame, bg="#16213e")
+            frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            tk.Label(
+                frame,
+                text=f"Resource {chr(65+i)}:",
+                font=("Arial", 11, "bold"),
+                bg="#16213e",
+                fg="#ffffff",
+                width=12
+            ).pack(side=tk.LEFT)
+            
+            tk.Label(frame, text="Total:", bg="#16213e", fg="#a0a0a0").pack(side=tk.LEFT, padx=5)
+            total_entry = tk.Entry(frame, width=8, font=("Arial", 10))
+            total_entry.insert(0, str(total))
+            total_entry.pack(side=tk.LEFT, padx=2)
+            
+            tk.Label(frame, text="Available:", bg="#16213e", fg="#a0a0a0").pack(side=tk.LEFT, padx=5)
+            avail_entry = tk.Entry(frame, width=8, font=("Arial", 10))
+            avail_entry.insert(0, str(available))
+            avail_entry.pack(side=tk.LEFT, padx=2)
+            
+            # Progress bar
+            progress = ttk.Progressbar(frame, length=150, mode='determinate')
+            progress['value'] = (available / total) * 100 if total > 0 else 0
+            progress.pack(side=tk.LEFT, padx=10)
+            
+            self.resource_entries.append((total_entry, avail_entry, progress))
+        
+        # Process Table
+        process_frame = tk.LabelFrame(
+            left_panel,
+            text="⚙️ Process Resource Allocation",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff",
+            bd=2
+        )
+        process_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Treeview for processes
+        columns = ("Process", "Allocated", "Max Need", "Current Need")
+        self.tree = ttk.Treeview(process_frame, columns=columns, show="headings", height=10)
+        
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=120, anchor=tk.CENTER)
+        
+        # Style for treeview
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview", background="#0f3460", foreground="white", fieldbackground="#0f3460")
+        style.configure("Treeview.Heading", background="#16213e", foreground="#00d4ff", font=("Arial", 10, "bold"))
+        
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(process_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.update_process_table()
+        
+        # Process control buttons
+        btn_frame = tk.Frame(left_panel, bg="#16213e")
+        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Button(
+            btn_frame,
+            text="➕ Add Process",
+            command=self.add_process,
+            bg="#00a86b",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="✏️ Edit Selected",
+            command=self.edit_process,
+            bg="#ffa500",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="🗑️ Remove Selected",
+            command=self.remove_process,
+            bg="#ff4444",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Right Panel - Control & Results
+        right_panel = tk.Frame(main_container, bg="#1a1a2e")
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5)
+        
+        # Control Panel
+        control_frame = tk.LabelFrame(
+            right_panel,
+            text="🎮 Control Panel",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff",
+            bd=2
+        )
+        control_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Algorithm selection
+        algo_frame = tk.Frame(control_frame, bg="#16213e")
+        algo_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Label(
+            algo_frame,
+            text="Algorithm:",
+            font=("Arial", 11, "bold"),
+            bg="#16213e",
+            fg="#ffffff"
+        ).pack(side=tk.LEFT, padx=5)
+        
+        self.algo_var = tk.StringVar(value="Banker's Algorithm")
+        algo_combo = ttk.Combobox(
+            algo_frame,
+            textvariable=self.algo_var,
+            values=["Banker's Algorithm", "Resource Allocation Graph", "Wait-For Graph"],
+            state="readonly",
+            width=25
+        )
+        algo_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Speed control
+        speed_frame = tk.Frame(control_frame, bg="#16213e")
+        speed_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(
+            speed_frame,
+            text="Animation Speed:",
+            font=("Arial", 11, "bold"),
+            bg="#16213e",
+            fg="#ffffff"
+        ).pack(side=tk.LEFT, padx=5)
+        
+        self.speed_var = tk.IntVar(value=1000)
+        speed_scale = tk.Scale(
+            speed_frame,
+            from_=100,
+            to=3000,
+            orient=tk.HORIZONTAL,
+            variable=self.speed_var,
+            bg="#16213e",
+            fg="#ffffff",
+            highlightthickness=0,
+            length=200
+        )
+        speed_scale.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(
+            speed_frame,
+            textvariable=self.speed_var,
+            bg="#16213e",
+            fg="#00d4ff",
+            font=("Arial", 10)
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Control buttons
+        btn_control_frame = tk.Frame(control_frame, bg="#16213e")
+        btn_control_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.run_btn = tk.Button(
+            btn_control_frame,
+            text="▶️ Run Detection",
+            command=self.run_detection,
+            bg="#8b5cf6",
+            fg="white",
+            font=("Arial", 12, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=10
+        )
+        self.run_btn.pack(fill=tk.X, pady=5)
+        
+        tk.Button(
+            btn_control_frame,
+            text="🔄 Reset System",
+            command=self.reset_system,
+            bg="#ff6b35",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=8
+        ).pack(fill=tk.X, pady=5)
+        
+        tk.Button(
+            btn_control_frame,
+            text="💾 Export Config",
+            command=self.export_config,
+            bg="#1e90ff",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=8
+        ).pack(fill=tk.X, pady=5)
+        
+        tk.Button(
+            btn_control_frame,
+            text="📂 Import Config",
+            command=self.import_config,
+            bg="#20b2aa",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=8
+        ).pack(fill=tk.X, pady=5)
+        
+        # Detection Result
+        self.result_frame = tk.LabelFrame(
+            right_panel,
+            text="🔍 Detection Results",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff",
+            bd=2
+        )
+        self.result_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.result_label = tk.Label(
+            self.result_frame,
+            text="⏳ Run detection to see results",
+            font=("Arial", 12),
+            bg="#16213e",
+            fg="#a0a0a0",
+            wraplength=400,
+            justify=tk.LEFT
+        )
+        self.result_label.pack(padx=20, pady=20)
+        
+        # Activity Logs
+        log_frame = tk.LabelFrame(
+            right_panel,
+            text="📋 Activity Logs",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff",
+            bd=2
+        )
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Log text widget
+        self.log_text = tk.Text(
+            log_frame,
+            height=15,
+            bg="#0f0f0f",
+            fg="#00ff00",
+            font=("Courier", 9),
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        log_scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scrollbar.set)
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Clear logs button
+        tk.Button(
+            log_frame,
+            text="🗑️ Clear Logs",
+            command=self.clear_logs,
+            bg="#555",
+            fg="white",
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=3
+        ).pack(pady=5)
+        
+        self.add_log("System initialized successfully", "INFO")
+    
+    def update_process_table(self):
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Add processes
+        for proc in self.processes:
+            allocated = str(proc["allocated"])
+            max_need = str(proc["max_need"])
+            need = [proc["max_need"][i] - proc["allocated"][i] for i in range(len(proc["allocated"]))]
+            
+            self.tree.insert("", tk.END, values=(
+                proc["name"],
+                allocated,
+                max_need,
+                str(need)
+            ))
+    
+    def add_log(self, message, level="INFO"):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {level}: {message}\n"
+        
+        self.log_text.configure(state=tk.NORMAL)
+        
+        if level == "ERROR":
+            self.log_text.insert(tk.END, log_entry, "error")
+            self.log_text.tag_config("error", foreground="#ff4444")
+        elif level == "SUCCESS":
+            self.log_text.insert(tk.END, log_entry, "success")
+            self.log_text.tag_config("success", foreground="#00ff00")
+        elif level == "WARNING":
+            self.log_text.insert(tk.END, log_entry, "warning")
+            self.log_text.tag_config("warning", foreground="#ffaa00")
+        else:
+            self.log_text.insert(tk.END, log_entry, "info")
+            self.log_text.tag_config("info", foreground="#00d4ff")
+        
+        self.log_text.see(tk.END)
+        self.log_text.configure(state=tk.DISABLED)
+    
+    def clear_logs(self):
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.configure(state=tk.DISABLED)
+        self.add_log("Logs cleared", "INFO")
+    
+    def run_detection(self):
+        if self.is_running:
+            return
+        
+        self.is_running = True
+        self.run_btn.configure(text="⏸️ Running...", state=tk.DISABLED)
+        self.add_log("Starting deadlock detection...", "INFO")
+        
+        # Run in separate thread
+        thread = threading.Thread(target=self.detect_deadlock)
+        thread.start()
+    
+    def detect_deadlock(self):
+        try:
+            # Update resources from entries
+            self.update_resources_from_ui()
+            
+            # Banker's Algorithm
+            work = self.available_resources.copy()
+            finish = [False] * len(self.processes)
+            safe_sequence = []
+            
+            self.add_log("Analyzing resource allocation...", "INFO")
+            time.sleep(self.speed_var.get() / 1000)
+            
+            for _ in range(len(self.processes)):
+                found = False
+                
+                for i, proc in enumerate(self.processes):
+                    if not finish[i]:
+                        need = [proc["max_need"][j] - proc["allocated"][j] for j in range(len(work))]
+                        
+                        if all(need[j] <= work[j] for j in range(len(work))):
+                            self.add_log(f"Process {proc['name']} can complete", "SUCCESS")
+                            
+                            for j in range(len(work)):
+                                work[j] += proc["allocated"][j]
+                            
+                            finish[i] = True
+                            safe_sequence.append(proc["name"])
+                            found = True
+                            time.sleep(self.speed_var.get() / 1000)
+                            break
+                
+                if not found and not all(finish):
+                    break
+            
+            # Display results
+            if all(finish):
+                result_text = "✅ SYSTEM IS IN SAFE STATE\n\n"
+                result_text += f"Safe Sequence: {' → '.join(safe_sequence)}\n"
+                result_text += "All processes can complete successfully!"
+                
+                self.result_label.configure(
+                    text=result_text,
+                    fg="#00ff00",
+                    font=("Arial", 11, "bold")
+                )
+                self.add_log(f"Safe sequence found: {' → '.join(safe_sequence)}", "SUCCESS")
+            else:
+                deadlocked = [self.processes[i]["name"] for i in range(len(finish)) if not finish[i]]
+                result_text = "⚠️ DEADLOCK DETECTED!\n\n"
+                result_text += f"Deadlocked Processes: {', '.join(deadlocked)}\n"
+                result_text += "Immediate attention required!"
+                
+                self.result_label.configure(
+                    text=result_text,
+                    fg="#ff4444",
+                    font=("Arial", 11, "bold")
+                )
+                self.add_log(f"DEADLOCK! Processes: {', '.join(deadlocked)}", "ERROR")
+        
+        except Exception as e:
+            self.add_log(f"Error during detection: {str(e)}", "ERROR")
+            messagebox.showerror("Error", f"Detection failed: {str(e)}")
+        
+        finally:
+            self.is_running = False
+            self.run_btn.configure(text="▶️ Run Detection", state=tk.NORMAL)
+    
+    def update_resources_from_ui(self):
+        try:
+            for i, (total_entry, avail_entry, progress) in enumerate(self.resource_entries):
+                self.total_resources[i] = int(total_entry.get())
+                self.available_resources[i] = int(avail_entry.get())
+                progress['value'] = (self.available_resources[i] / self.total_resources[i]) * 100
+        except ValueError:
+            messagebox.showerror("Error", "Please enter valid numbers for resources")
+    
+    def add_process(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add New Process")
+        dialog.geometry("400x300")
+        dialog.configure(bg="#16213e")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        tk.Label(
+            dialog,
+            text="Enter Process Details",
+            font=("Arial", 14, "bold"),
+            bg="#16213e",
+            fg="#00d4ff"
+        ).pack(pady=10)
+        
+        # Process name
+        name_frame = tk.Frame(dialog, bg="#16213e")
+        name_frame.pack(fill=tk.X, padx=20, pady=5)
+        tk.Label(name_frame, text="Name:", bg="#16213e", fg="white", width=12).pack(side=tk.LEFT)
+        name_entry = tk.Entry(name_frame, width=20)
+        name_entry.insert(0, f"P{len(self.processes) + 1}")
+        name_entry.pack(side=tk.LEFT)
+        
+        # Allocated resources
+        alloc_frame = tk.Frame(dialog, bg="#16213e")
+        alloc_frame.pack(fill=tk.X, padx=20, pady=5)
+        tk.Label(alloc_frame, text="Allocated:", bg="#16213e", fg="white", width=12).pack(side=tk.LEFT)
+        alloc_entries = []
+        for i in range(len(self.total_resources)):
+            entry = tk.Entry(alloc_frame, width=6)
+            entry.insert(0, "0")
+            entry.pack(side=tk.LEFT, padx=2)
+            alloc_entries.append(entry)
+        
+        # Max need
+        max_frame = tk.Frame(dialog, bg="#16213e")
+        max_frame.pack(fill=tk.X, padx=20, pady=5)
+        tk.Label(max_frame, text="Max Need:", bg="#16213e", fg="white", width=12).pack(side=tk.LEFT)
+        max_entries = []
+        for i in range(len(self.total_resources)):
+            entry = tk.Entry(max_frame, width=6)
+            entry.insert(0, "1")
+            entry.pack(side=tk.LEFT, padx=2)
+            max_entries.append(entry)
+        
+        def save_process():
+            try:
+                name = name_entry.get()
+                allocated = [int(e.get()) for e in alloc_entries]
+                max_need = [int(e.get()) for e in max_entries]
+                
+                self.processes.append({
+                    "name": name,
+                    "allocated": allocated,
+                    "max_need": max_need
+                })
+                
+                self.update_process_table()
+                self.add_log(f"Added process {name}", "SUCCESS")
+                dialog.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "Please enter valid numbers")
+        
+        tk.Button(
+            dialog,
+            text="Add Process",
+            command=save_process,
